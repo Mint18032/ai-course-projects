@@ -62,6 +62,15 @@ class ValueIterationAgent(ValueEstimationAgent):
     def runValueIteration(self):
         # Write value iteration code here
         "*** YOUR CODE HERE ***"
+        for _ in range(self.iterations):
+            newValues = util.Counter()
+            for state in self.mdp.getStates():
+                if not self.mdp.isTerminal(state):
+                    newValues[state] = float('-inf')
+                    for action in self.mdp.getPossibleActions(state):
+                        QValue = self.computeQValueFromValues(state, action)
+                        newValues[state] = max(newValues[state], QValue)
+            self.values = newValues
 
 
     def getValue(self, state):
@@ -77,7 +86,11 @@ class ValueIterationAgent(ValueEstimationAgent):
           value function stored in self.values.
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        values = util.Counter()
+        for nextState, prob in self.mdp.getTransitionStatesAndProbs(state, action):
+            reward = self.mdp.getReward(state, action, nextState)
+            values[nextState] = prob * (reward + self.discount*self.values[nextState])
+        return values.totalCount()
 
     def computeActionFromValues(self, state):
         """
@@ -89,7 +102,10 @@ class ValueIterationAgent(ValueEstimationAgent):
           terminal state, you should return None.
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        actionValues = util.Counter()
+        for action in self.mdp.getPossibleActions(state):
+            actionValues[action] = self.computeQValueFromValues(state, action)
+        return actionValues.argMax()
 
     def getPolicy(self, state):
         return self.computeActionFromValues(state)
@@ -130,6 +146,15 @@ class AsynchronousValueIterationAgent(ValueIterationAgent):
 
     def runValueIteration(self):
         "*** YOUR CODE HERE ***"
+        states = self.mdp.getStates()
+        for i in range(self.iterations):
+            state = states[i % len(states)]
+            if not self.mdp.isTerminal(state):
+                bestQValue = float('-inf')
+                for action in self.mdp.getPossibleActions(state):
+                    QValue = self.computeQValueFromValues(state, action)
+                    bestQValue = max(bestQValue, QValue)
+                self.values[state] = bestQValue
 
 class PrioritizedSweepingValueIterationAgent(AsynchronousValueIterationAgent):
     """
@@ -148,6 +173,48 @@ class PrioritizedSweepingValueIterationAgent(AsynchronousValueIterationAgent):
         self.theta = theta
         ValueIterationAgent.__init__(self, mdp, discount, iterations)
 
+    def difference(self, state):
+        """
+            Returns the absolute value of the difference between the current value of state
+            and the highest Q-Value in all possible actions from state
+        """
+        bestQValue = float('-inf')
+
+        for action in self.mdp.getPossibleActions(state):
+            QValue = self.computeQValueFromValues(state, action)
+            bestQValue = max(bestQValue, QValue)
+
+        return abs(bestQValue - self.values[state])
+
     def runValueIteration(self):
         "*** YOUR CODE HERE ***"
+        # containing all the predecessors of that state
+        predecessors = collections.defaultdict(set)
 
+        for state in self.mdp.getStates():
+            for action in self.mdp.getPossibleActions(state):
+                for nextState, prob in self.mdp.getTransitionStatesAndProbs(state, action):
+                    # nonzero probability of being reached
+                    if prob > 0: predecessors[nextState].add(state)
+
+        queue = util.PriorityQueue()
+
+        for state in self.mdp.getStates():
+            if not self.mdp.isTerminal(state):
+                diff = self.difference(state)
+                queue.push(state, -diff)
+
+        for _ in range(self.iterations):
+
+            if queue.isEmpty(): break
+
+            state = queue.pop()
+            bestQValue = float('-inf')
+            for action in self.mdp.getPossibleActions(state):
+                QValue = self.computeQValueFromValues(state, action)
+                bestQValue = max(bestQValue, QValue)
+            self.values[state] = bestQValue
+
+            for predecessor in predecessors[state]:
+                diff = self.difference(predecessor)
+                if diff > self.theta: queue.update(predecessor, -diff)
